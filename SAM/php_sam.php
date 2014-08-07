@@ -38,7 +38,7 @@ define('SAM_MQTT', 'mqtt');
     SAMConnection
    --------------------------------- */
 class SAMConnection {
-//  var $debug = true;
+ // var $debug = true;
   var $debug = false;
 
   var $errno = 0;

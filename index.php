@@ -59,7 +59,7 @@
                   </div>
                 </div>
                 </br/>
-                <button id="submit">Execute remote Command</button>
+                <button id="executeCommand">Execute remote Command</button>
               </div>
               <div id="tabs-2">
                 <div id="devicePolicy">
