@@ -26,7 +26,6 @@ $(function() {
 
     }
 
-    console.log(message);
     $('.sent').hide();
     $('.loading').slideToggle('fast');
 
@@ -34,13 +33,12 @@ $(function() {
 	    url: 'send_mqtt.php',
 			type: 'POST',
 			data: {'target': target, 'message': JSON.stringify(message)},
-			timeout: 20000,
+			timeout: 2000,
 			error: function(){				      
         $('.loading').slideToggle('fast');
 	      alert('Failed to communicate to the server. Try again!')                                     
 			},
 			success: function(text){
-        console.log(text);
         $('.loading').slideToggle('fast');
 			  if (text == '') {
 			    alert('Failed to send the message. Try again!')                                     
@@ -50,7 +48,4 @@ $(function() {
 			}
     });          
 	}); 
-
-
-
 })
