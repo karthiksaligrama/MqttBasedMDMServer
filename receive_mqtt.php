@@ -5,15 +5,14 @@
 
 require('SAM/php_sam.php');
 
-//create a new connection object，创建一个新的连接对象
+//create a new connection object
 $conn = new SAMConnection();
 //$conn->SetDebug(true);
-//start initialise the connection，开始初始化连接
+//start initialise the connection
 $conn->connect(SAM_MQTT, array(SAM_HOST => '127.0.0.1',
                                SAM_PORT => 1883, 
                                SAM_MQTT_CLEANSTART => false ));     
 
-//接收通知
 $sid=$conn->Subscribe('topic://xxx', array(SAM_MQTT_QOS => 2, SAM_MQTT_SUBID => "yyxyy"));
 if($sid)
 {
