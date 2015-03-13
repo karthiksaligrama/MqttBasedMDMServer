@@ -48,6 +48,7 @@ class SAMConnection_MQTT {
   var $cleanstart = false;
   var $virtualConnected = false;
   var $connected = false;
+  var $messageQueue=array();
   /*
    Our current open socket...
   */
@@ -235,6 +236,11 @@ class SAMConnection_MQTT {
 
     if ($rc) {
 
+        if(count($this->messageQueue)>0)
+        {
+            return array_shift($this->messageQueue);
+        }
+
         /* have we got a timeout specified?    */
         if (array_key_exists(SAM_WAIT, $options) && $options[SAM_WAIT] > 1) {
             $m = $options[SAM_WAIT] % 1000;
@@ -246,7 +252,7 @@ class SAMConnection_MQTT {
             if ($this->debug) t('SAMConnection_MQTT.Receive() no timeout value found!');
         }
 
-$mid=0;
+        $mid=0;
 repeat:
         $hdr = $this->read_fixed_header($this->sock);
         if (!$hdr) {
@@ -581,8 +587,8 @@ repeat:
                         $rc->header->SAM_MQTT_QOS = $hdr['qos'];
                         $rc->header->SAM_TYPE = 'SAM_BYTES';
                         
-                        var_dump($rc);
-
+                        $this->messageQueue[]=$rc;
+                        
                         if($hdr['qos']==2)
                         {
                             $variable = pack('n', $mid);
@@ -591,8 +597,6 @@ repeat:
                         }
 
                         goto repeat;
-                                    //    $rc = $this->sub_id.SAM_MQTT_SUB_SEPARATOR.$t;
-
                     }
                 } else {
                     $this->errno = 303;
