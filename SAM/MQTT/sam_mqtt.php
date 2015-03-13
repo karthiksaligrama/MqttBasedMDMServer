@@ -273,6 +273,7 @@ class SAMConnection_MQTT {
                             $this->errno = 303;
                             $this->error = 'Receive request failed, message format invalid!';
                             $rc = false;
+                            break;
                         } else {
                             if ($this->debug) t('SAMConnection_MQTT.Receive() topic='.$topic);
                             $len -= (strlen($topic) + 2);
@@ -305,6 +306,7 @@ class SAMConnection_MQTT {
                         $this->errno = 303;
                         $this->error = 'Receive request failed, received message too short! No topic data';
                         $rc = false;
+                        break;
                     }
                 }
                 else if ($hdr['mtype'] == $this->operations['MQTT_PUBREL']) {
@@ -318,6 +320,7 @@ class SAMConnection_MQTT {
                         $this->errno = 302;
                         $this->error = 'Send request failed!';
                         $rc = false;
+                        break;
                     } else {
                         
                         $variable = pack('n', $mid);
@@ -330,6 +333,7 @@ class SAMConnection_MQTT {
                 else {
                     if ($this->debug) t('!!! SAMConnection_MQTT.Receive() Receive failed response mtype = '.$hdr["mtype"]);
                     $rc = false;
+                    break;
                 }
             }
         }
@@ -562,6 +566,7 @@ class SAMConnection_MQTT {
                     $this->errno = 301;
                     $this->error = 'Subscribe request failed, incorrect length response ($len) received!';
                     $rc = false;
+                    break;
                 }
             }
             else if ($hdr['mtype'] == $this->operations['MQTT_PUBLISH']) {
@@ -573,6 +578,7 @@ class SAMConnection_MQTT {
                             $this->errno = 303;
                             $this->error = 'Receive request failed, message format invalid!';
                             $rc = false;
+                            break;
                         } else {
                             if ($this->debug) t('SAMConnection_MQTT.Receive() topic='.$topic);
                             $len -= (strlen($topic) + 2);
@@ -607,6 +613,7 @@ class SAMConnection_MQTT {
                         $this->errno = 303;
                         $this->error = 'Subscript request failed, received message too short! No topic data';
                         $rc = false;
+                        break;
                     }
                 }
                 else if ($hdr['mtype'] == $this->operations['MQTT_PUBREL']) {
@@ -620,6 +627,7 @@ class SAMConnection_MQTT {
                         $this->errno = 302;
                         $this->error = 'Send request failed!';
                         $rc = false;
+                        break;
                     } else {
                         $variable = pack('n', $mid);
                         $msg = $this->fixed_header("MQTT_PUBCOMP").$this->remaining_length(strlen($variable)).$variable;
@@ -630,16 +638,17 @@ class SAMConnection_MQTT {
                 } 
                 else {
                     if ($this->debug) t('SAMConnection_MQTT.Subscribe() subscribe failed response mtype = '.$hdr['mtype']);
-                $rc = false;
+                    $rc = false;
+                    break;
+                }
             }
         }
-    }
 
-    if ($this->debug) var_dump($subrc);//x("SAMConnection_MQTT.Subscribe() rc=$rc");
-    if($subrc)
-        return $subrc;
-    else
-        return false;
+        if ($this->debug) var_dump($subrc);//x("SAMConnection_MQTT.Subscribe() rc=$rc");
+        if($subrc)
+            return $subrc;
+        else
+            return false;
   }
 
   /* ---------------------------------
