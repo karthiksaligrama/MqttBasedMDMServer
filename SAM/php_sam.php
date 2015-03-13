@@ -38,7 +38,7 @@ define('SAM_MQTT', 'mqtt');
     SAMConnection
    --------------------------------- */
 class SAMConnection {
- // var $debug = true;
+//  var $debug = true;
   var $debug = false;
 
   var $errno = 0;
@@ -276,7 +276,7 @@ class SAMConnection {
         }
     }
 
-    if ($this->debug) x("SAMConnection.Receive() rc=$rc");
+    if ($this->debug) var_dump($rc);//x("SAMConnection.Receive() rc=$rc");
     return $rc;
   }
 
@@ -396,7 +396,7 @@ class SAMConnection {
         }
     }
 
-    if ($this->debug) x("SAMConnection.Subscribe() rc=$rc");
+    if ($this->debug) var_dump($rc);//x("SAMConnection.Subscribe() rc=$rc");
     return $rc;
   }
 

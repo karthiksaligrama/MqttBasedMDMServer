@@ -23,9 +23,11 @@ $Id: sam_mqtt.php,v 1.1 2007/02/02 15:36:46 dsr Exp $
 
 */
 
-define("SAM_MQTT_CLEANSTART", "SAM_MQTT_CLEANSTART");
-define("SAM_MQTT_QOS", "SAM_MQTT_QOS");
+define("SAM_MQTT_CLEANSTART",    "SAM_MQTT_CLEANSTART");
+define("SAM_MQTT_QOS",           "SAM_MQTT_QOS");
 define("SAM_MQTT_SUB_SEPARATOR", "#-#");
+define("SAM_MQTT_SUBID",         "SAM_MQTT_SUBID");
+define("SAM_WAIT",               "SAM_WAIT");
 /* ---------------------------------
     SAMConnection
    --------------------------------- */
@@ -46,6 +48,7 @@ class SAMConnection_MQTT {
   var $cleanstart = false;
   var $virtualConnected = false;
   var $connected = false;
+  var $messageQueue=array();
   /*
    Our current open socket...
   */
@@ -110,7 +113,7 @@ class SAMConnection_MQTT {
         $this->host = $options[SAM_HOST];
     }
 
-    $this->cleanstart = in_array(SAM_MQTT_CLEANSTART, $options);
+    $this->cleanstart = array_key_exists(SAM_MQTT_CLEANSTART, $options)? $options[SAM_MQTT_CLEANSTART]:false;
 
     if ($this->debug) t("SAMConnection_MQTT.Connect() host=$this->host, port=$this->port, cleanstart=$this->cleanstart");
 
@@ -233,8 +236,13 @@ class SAMConnection_MQTT {
 
     if ($rc) {
 
+        if(count($this->messageQueue)>0)
+        {
+            return array_shift($this->messageQueue);
+        }
+
         /* have we got a timeout specified?    */
-        if ($options[SAM_WAIT] > 1) {
+        if (array_key_exists(SAM_WAIT, $options) && $options[SAM_WAIT] > 1) {
             $m = $options[SAM_WAIT] % 1000;
             $s = ($options[SAM_WAIT] - $m) /1000;
             if ($this->debug) t('SAMConnection_MQTT.Receive() timeout='.$options[SAM_WAIT]." ($s secs $m millisecs)");
@@ -244,48 +252,89 @@ class SAMConnection_MQTT {
             if ($this->debug) t('SAMConnection_MQTT.Receive() no timeout value found!');
         }
 
-        $hdr = $this->read_fixed_header($this->sock);
-        if (!$hdr) {
-            $this->errno = 500;
-            $this->error = 'Receive request failed, timed out with no data!';
-            $rc = false;
-        } else {
-            if ($hdr['mtype'] == $this->operations['MQTT_PUBLISH']) {
-                $len = $this->read_remaining_length($this->sock);
-                if ($len > 1) {
-                    /* read the topic length...   */
-                    $topic = $this->read_topic($this->sock);
-                    if (!$topic) {
-                        $this->errno = 303;
-                        $this->error = 'Receive request failed, message format invalid!';
-                        $rc = false;
-                    } else {
-                        if ($this->debug) t('SAMConnection_MQTT.Receive() topic='.$topic);
-                        $len -= (strlen($topic) + 2);
-                        /* If QoS 1 or 2 then read the message id...   */
-                        if ($hdr['qos'] > 0) {
-                            $idb = fread($this->sock, 2);
-                            $len -= 2;
-                            $fields = unpack('na', $idb);
-                            $mid = $fields['a'];
-                            if ($this->debug) t('SAMConnection_MQTT.Receive() mid='.$mid);
-                        }
-                        $payload = fread($this->sock, $len);
-                        if ($this->debug) t('SAMConnection_MQTT.Receive() payload='.$payload);
-                        $rc = new SAMMessage();
-                        $rc->body = $payload;
-                        $rc->header->SAM_MQTT_TOPIC = 'topic://'.$topic;
-                        $rc->header->SAM_MQTT_QOS = $hdr['qos'];
-                        $rc->header->SAM_TYPE = 'SAM_BYTES';
-                    }
-                } else {
-                    $this->errno = 303;
-                    $this->error = 'Receive request failed, received message too short! No topic data';
-                    $rc = false;
-                }
-            } else {
-                if ($this->debug) t('SAMConnection_MQTT.Receive() Receive failed response mtype = '.$mtype);
+        $mid=0;
+        $resp_pending=1;
+        while($resp_pending)
+        {
+            $hdr = $this->read_fixed_header($this->sock);
+            if (!$hdr) {
+                $this->errno = 500;
+                $this->error = 'Receive request failed, timed out with no data!';
                 $rc = false;
+                break;
+            } else {
+                if ($hdr['mtype'] == $this->operations['MQTT_PUBLISH']) {
+                    $resp_pending--;
+                    $len = $this->read_remaining_length($this->sock);
+                    if ($len > 1) {
+                        /* read the topic length...   */
+                        $topic = $this->read_topic($this->sock);
+                        if (!$topic) {
+                            $this->errno = 303;
+                            $this->error = 'Receive request failed, message format invalid!';
+                            $rc = false;
+                            break;
+                        } else {
+                            if ($this->debug) t('SAMConnection_MQTT.Receive() topic='.$topic);
+                            $len -= (strlen($topic) + 2);
+                            /* If QoS 1 or 2 then read the message id...   */
+                            if ($hdr['qos'] > 0) {
+                                $idb = fread($this->sock, 2);
+                                $len -= 2;
+                                $fields = unpack('na', $idb);
+                                $mid = $fields['a'];
+                                if ($this->debug) t('SAMConnection_MQTT.Receive() mid='.$mid);
+                            }
+                            $payload = fread($this->sock, $len);
+                            
+                            if ($this->debug) t('SAMConnection_MQTT.Receive() payload='.$payload);
+                            $rc = new SAMMessage();
+                            $rc->body = $payload;
+                            $rc->header->SAM_MQTT_TOPIC = 'topic://'.$topic;
+                            $rc->header->SAM_MQTT_QOS = $hdr['qos'];
+                            $rc->header->SAM_TYPE = 'SAM_BYTES';
+    
+                            if($hdr['qos']==2)
+                            {
+                                $variable = pack('n', $mid);
+                                $msg = $this->fixed_header("MQTT_PUBREC").$this->remaining_length(strlen($variable)).$variable;
+                                fwrite($this->sock, $msg);
+                                $resp_pending++;
+                            }
+                        }
+                    } else {
+                        $this->errno = 303;
+                        $this->error = 'Receive request failed, received message too short! No topic data';
+                        $rc = false;
+                        break;
+                    }
+                }
+                else if ($hdr['mtype'] == $this->operations['MQTT_PUBREL']) {
+                    $resp_pending--;
+                    $len = $this->read_remaining_length($this->sock);
+                    if ($len > 0) {
+                        $response = fread($this->sock, $len);
+                    }
+                    if ($len < 2) {
+                        if ($this->debug) t("SAMConnection_MQTT.Send() send failed, incorrect length response ($len) received!");
+                        $this->errno = 302;
+                        $this->error = 'Send request failed!';
+                        $rc = false;
+                        break;
+                    } else {
+                        
+                        $variable = pack('n', $mid);
+                        $msg = $this->fixed_header("MQTT_PUBCOMP").$this->remaining_length(strlen($variable)).$variable;
+                        fwrite($this->sock, $msg);
+
+                        $rc = true;
+                    }
+                }
+                else {
+                    if ($this->debug) t('!!! SAMConnection_MQTT.Receive() Receive failed response mtype = '.$hdr["mtype"]);
+                    $rc = false;
+                    break;
+                }
             }
         }
     }
@@ -461,11 +510,15 @@ class SAMConnection_MQTT {
         return false;
     }
 
-    if (in_array(SAM_MQTT_QOS, $options)) {
+    if (array_key_exists(SAM_MQTT_QOS, $options)) {
         $qos = $options[SAM_MQTT_QOS];
     } else {
         $qos = 0;
     }
+
+    if (array_key_exists(SAM_MQTT_SUBID, $options)) {
+        $this->sub_id = $options[SAM_MQTT_SUBID];
+    } 
 
     /* Are we already connected?               */
     if (!$this->connected) {
@@ -486,34 +539,116 @@ class SAMConnection_MQTT {
     $msg = $this->fixed_header("MQTT_SUBSCRIBE", 0, 1) . $this->remaining_length(strlen($variable)+strlen($payload)) . $variable . $payload;
 
     fwrite($this->sock, $msg);
-    $hdr = $this->read_fixed_header($this->sock);
-    if (!$hdr) {
-        if ($this->debug) t("SAMConnection_MQTT.Subscribe() subscribe failed, no response from broker!");
-        $this->errno = 301;
-        $this->error = 'Subscribe request failed, no response from broker!';
-        $rc = false;
-    } else {
-        if ($hdr['mtype'] == $this->operations['MQTT_SUBACK']) {
-            $len = $this->read_remaining_length($this->sock);
-            if ($len > 0) {
-                $response = fread($this->sock, $len);
-                /* Return the subscription id with the topic appended to it so we can unsubscribe easily... */
-                $rc = $this->sub_id.SAM_MQTT_SUB_SEPARATOR.$t;
-            }
-            if ($len < 3) {
-                if ($this->debug) t("SAMConnection_MQTT.Subscribe() subscribe failed, incorrect length response ($len) received!");
-                $this->errno = 301;
-                $this->error = 'Subscribe request failed, incorrect length response ($len) received!';
-                $rc = false;
-            }
-        } else {
-            if ($this->debug) t('SAMConnection_MQTT.Subscribe() subscribe failed response mtype = '.$mtype);
-            $rc = false;
-        }
-    }
 
-    if ($this->debug) x("SAMConnection_MQTT.Subscribe() rc=$rc");
-    return $rc;
+    $mid=0;
+    $resp_pending=1;
+    $subrc="";
+    while($resp_pending)
+    {
+        $hdr = $this->read_fixed_header($this->sock);
+        if (!$hdr) {
+            if ($this->debug) t("SAMConnection_MQTT.Subscribe() subscribe failed, no response from broker!");
+            $this->errno = 301;
+            $this->error = 'Subscribe request failed, no response from broker!';
+            $rc = false;
+            break;
+        } else {
+            if ($hdr['mtype'] == $this->operations['MQTT_SUBACK']) {
+                $resp_pending--;
+                $len = $this->read_remaining_length($this->sock);
+                if ($len > 0) {
+                    $response = fread($this->sock, $len);
+                    /* Return the subscription id with the topic appended to it so we can unsubscribe easily... */
+                    $subrc = $this->sub_id.SAM_MQTT_SUB_SEPARATOR.$t;
+                }
+                if ($len < 3) {
+                    if ($this->debug) t("SAMConnection_MQTT.Subscribe() subscribe failed, incorrect length response ($len) received!");
+                    $this->errno = 301;
+                    $this->error = 'Subscribe request failed, incorrect length response ($len) received!';
+                    $rc = false;
+                    break;
+                }
+            }
+            else if ($hdr['mtype'] == $this->operations['MQTT_PUBLISH']) {
+                    $len = $this->read_remaining_length($this->sock);
+                    if ($len > 1) {
+                        /* read the topic length...   */
+                        $topic = $this->read_topic($this->sock);
+                        if (!$topic) {
+                            $this->errno = 303;
+                            $this->error = 'Receive request failed, message format invalid!';
+                            $rc = false;
+                            break;
+                        } else {
+                            if ($this->debug) t('SAMConnection_MQTT.Receive() topic='.$topic);
+                            $len -= (strlen($topic) + 2);
+                            /* If QoS 1 or 2 then read the message id...   */
+                            if ($hdr['qos'] > 0) {
+                                $idb = fread($this->sock, 2);
+                                $len -= 2;
+                                $fields = unpack('na', $idb);
+                                $mid = $fields['a'];
+                                if ($this->debug) t('SAMConnection_MQTT.Receive() mid='.$mid);
+                            }
+                            $payload = fread($this->sock, $len);
+                            if ($this->debug) t('SAMConnection_MQTT.Receive() payload='.$payload);
+    
+                            $rc = new SAMMessage();
+                            $rc->body = $payload;
+                            $rc->header->SAM_MQTT_TOPIC = 'topic://'.$topic;
+                            $rc->header->SAM_MQTT_QOS = $hdr['qos'];
+                            $rc->header->SAM_TYPE = 'SAM_BYTES';
+                            
+                            $this->messageQueue[]=$rc;
+                            
+                            if($hdr['qos']==2)
+                            {
+                                $variable = pack('n', $mid);
+                                $msg = $this->fixed_header("MQTT_PUBREC").$this->remaining_length(strlen($variable)).$variable;
+                                fwrite($this->sock, $msg);
+                                $resp_pending++;
+                            }
+                        }
+                    } else {
+                        $this->errno = 303;
+                        $this->error = 'Subscript request failed, received message too short! No topic data';
+                        $rc = false;
+                        break;
+                    }
+                }
+                else if ($hdr['mtype'] == $this->operations['MQTT_PUBREL']) {
+                    $resp_pending--;
+                    $len = $this->read_remaining_length($this->sock);
+                    if ($len > 0) {
+                        $response = fread($this->sock, $len);
+                    }
+                    if ($len < 2) {
+                        if ($this->debug) t("SAMConnection_MQTT.Subscript() send failed, incorrect length response ($len) received!");
+                        $this->errno = 302;
+                        $this->error = 'Send request failed!';
+                        $rc = false;
+                        break;
+                    } else {
+                        $variable = pack('n', $mid);
+                        $msg = $this->fixed_header("MQTT_PUBCOMP").$this->remaining_length(strlen($variable)).$variable;
+                        fwrite($this->sock, $msg);
+    
+                        $rc = true;
+                    }
+                } 
+                else {
+                    if ($this->debug) t('SAMConnection_MQTT.Subscribe() subscribe failed response mtype = '.$hdr['mtype']);
+                    $rc = false;
+                    break;
+                }
+            }
+        }
+
+        if ($this->debug) var_dump($subrc);//x("SAMConnection_MQTT.Subscribe() rc=$rc");
+        if($subrc)
+            return $subrc;
+        else
+            return false;
   }
 
   /* ---------------------------------
